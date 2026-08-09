@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>FinanceVault</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▦</text></svg>">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand"><b>FinanceVault</b><span>리서치 대시보드</span></div>
+  <div class="searchbox">
+    <span class="ico">⌕</span>
+    <input id="q" type="search" placeholder="전체 검색 — 종목·문서·본문·노트" autocomplete="off">
+    <kbd>/</kbd>
+  </div>
+  <div class="spacer"></div>
+  <div class="meta" id="topmeta"></div>
+</header>
+
+<nav class="nav" id="nav">
+  <div class="grp">개요</div>
+  <a href="#/home" data-r="home"><span class="ic">◈</span>홈</a>
+  <a href="#/calendar" data-r="calendar"><span class="ic">▤</span>판별점 캘린더<span class="n" id="n-cal"></span></a>
+  <div class="grp">리서치</div>
+  <a href="#/coverage" data-r="coverage"><span class="ic">◎</span>내 커버리지<span class="n" id="n-cov"></span></a>
+  <a href="#/docs" data-r="docs"><span class="ic">▦</span>리서치 문서<span class="n" id="n-docs"></span></a>
+  <a href="#/notes" data-r="notes"><span class="ic">✎</span>위키·브레인<span class="n" id="n-notes"></span></a>
+  <div class="grp">AI밸류체인 — SAPIENS</div>
+  <a href="#/graph" data-r="graph"><span class="ic">⬡</span>관계 그래프<span class="n" id="n-graph"></span></a>
+  <a href="#/sapiens" data-r="sapiens"><span class="ic">◉</span>종목 트래커<span class="n" id="n-sap"></span></a>
+  <div class="grp">데이터</div>
+  <a href="#/data/industry" data-r="data"><span class="ic">▥</span>산업 DB<span class="n" id="n-ind"></span></a>
+  <a href="#/data/consensus" data-r="data2"><span class="ic">▧</span>컨센서스<span class="n" id="n-con"></span></a>
+  <a href="#/data/reports" data-r="data3"><span class="ic">≣</span>리포트 카탈로그<span class="n" id="n-rep"></span></a>
+</nav>
+
+<main class="main" id="main"></main>
+
+<script src="app.js"></script>
+</body>
+</html>
