@@ -157,7 +157,58 @@ function route(path) {
     console.error(e);
   });
 }
-window.addEventListener('hashchange', () => route(location.hash.slice(1) || '/graph'));
+window.addEventListener('hashchange', () => route(location.hash.slice(1) || '/brief'));
+
+/* ---------------------------------------------------------------- 브리핑 (기본 화면) */
+routes.brief = async main => {
+  const [b, g] = await Promise.all([data('brief'), data('graph')]);
+  const order = g.bucket_order || [];
+  const bstrip = g.bottleneck_strip || [];
+  const recent = bstrip.slice(-3);
+  const rh = Object.fromEntries(order.map(k => [k, recent.reduce((s, m) => s + (m[k] || 0), 0)]));
+  const hot = order.reduce((a, k) => (rh[k] || 0) > (rh[a] || 0) ? k : a, order[0]);
+  const upMain = b.upcoming.filter(c => c['트랙'] !== '회사');
+  const statusCls = s => s === '유효' ? 'ok' : s === '반증' ? 'bad' : 'mid';
+  main.innerHTML = `
+  <div class="phead"><h2>브리핑</h2>
+    <div class="desc">기준일 ${b.generated} · 코퍼스 최신 ${esc(b.corpus_last)} · 정독 ${esc(b.metrics['정독'])} · 판별점 확인율 ${esc(b.metrics['확인율'])}${b.metrics.lint ? ` · <span style="color:var(--up)">원장 정합오류 ${b.metrics.lint}</span>` : ''}</div>
+    <div class="right"><a class="btn" href="#/graph">지도 →</a></div></div>
+
+  <div class="grid" style="grid-template-columns:1.05fr .95fr;align-items:start;margin-bottom:14px">
+    <div class="card sec"><h3>임박 판별점 <span class="more">본체 트랙</span></h3>
+      ${upMain.slice(0, 6).map(c => `
+        <div class="bf-cp"><span class="bf-dd${c.dday <= 7 ? ' hot' : ''}">${c.dday === 0 ? 'D-day' : 'D-' + c.dday}</span>
+          <div><b>${esc(c.name)}</b> ${c.ticker ? `<span class="tk">${esc(c.ticker)}</span>` : ''} — ${esc(c.event)}
+          <div class="bf-th">${esc(c.threshold)}</div></div>
+          ${c['논제id'] ? `<span class="tag accent">${esc(c['논제id'])}</span>` : ''}</div>`).join('') || '<div class="empty">임박 없음</div>'}
+    </div>
+    <div class="card sec"><h3>병목 현재 위치</h3>
+      <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:9px">
+        ${order.map((k, i) => `${i ? '<span style="color:var(--faint)">→</span>' : ''}<span class="tag${k === hot ? ' buy' : ' line'}" style="font-size:12px;padding:4px 12px">${k}${k === hot ? ' ◀ 현재' : ''}</span>`).join('')}</div>
+      <div style="font-size:11.5px;color:var(--sub)">코퍼스 병목 주장 밀도 기준(최근 3개월). 이동 서사: 연산→메모리→네트워킹→전력</div>
+      <h3 style="margin-top:15px">새로 들어온 것 <span class="more">코퍼스 델타</span></h3>
+      ${b.recent_posts.slice(0, 5).map(p => `<div class="bf-new"><span class="d">${p.date}</span>
+        <span class="tag${p.type === 'deepdive' ? ' accent' : ''}">${esc(p.type)}</span>
+        <span class="t">${esc(p.title.slice(0, 44))}</span></div>`).join('')}
+      ${b.recent_ratings.length ? `<div style="margin-top:8px;font-size:11.5px;color:var(--sub)">최근 등급 언급: ${b.recent_ratings.slice(0, 4).map(e => `${esc(e.company)} <b>${esc(e.rating)}</b>(${esc(e.verb)})`).join(' · ')}</div>` : ''}
+    </div>
+  </div>
+
+  <h3 style="margin:4px 0 10px;font-size:14px">논제 보드 — 지금 걸려 있는 주장들</h3>
+  <div class="grid g3" style="margin-bottom:16px">
+    ${b.board.map(t => `
+      <div class="card bf-t">
+        <div class="bf-t-h"><span class="tag ${statusCls(t['상태'])}">${esc(t['상태'])}</span>
+          <b>${esc(t.id)}</b><span class="bf-t-target">${esc(t['대상'])}</span></div>
+        <div class="bf-t-claim">${esc(t['요지'])}</div>
+        <div class="bf-t-score">논거 <span class="ok">${t['논거']['적중']}적중</span> · ${t['논거']['미정']}미정${t['논거']['반증'] ? ` · <span class="bad">${t['논거']['반증']}반증</span>` : ''}
+          ${t['판정이력'].length ? ` | 판별 ${t['판정이력'].map(h => `${esc(h.name.slice(0, 10))} <b class="ok">${esc(h['판정'])}</b>`).join(', ')}` : ''}</div>
+        ${t.next_cp ? `<div class="bf-t-next">⚑ D-${t.next_cp.dday} ${esc(t.next_cp.name)} — ${esc(t.next_cp.event.slice(0, 40))}</div>` : ''}
+        ${t['알파'].length ? `<div class="bf-t-alpha">알파(컨센 미반영): ${t['알파'].map(a => esc(a['내용'].split(' — ')[0].slice(0, 42))).join(' / ')}</div>` : ''}
+      </div>`).join('')}
+  </div>
+  <div style="font-size:11px;color:var(--faint)">논제·논거·판별점 원장: db/판단/*.csv — 정독이 진행될수록 보드가 자란다 (현재 메모리 축 위주, ${esc(b.metrics['정독'])} 정독)</div>`;
+};
 
 /* ---------------------------------------------------------------- 홈 */
 routes.home = async main => {
@@ -503,7 +554,8 @@ routes.graph = async main => {
       <span class="gsub" id="gsel"></span>
       <div style="flex:1"></div>
       <label class="glg"><input type="checkbox" checked data-t="__money"><span class="gsw" style="background:#e8b84b"></span>돈의 흐름</label>
-      ${Object.entries(EDGE_COLOR).map(([t, c]) => `<label class="glg"><input type="checkbox" checked data-t="${t}"><span class="gsw" style="background:${c}"></span>${t}</label>`).join('')}
+      ${Object.entries(EDGE_COLOR).map(([t, c]) => `<label class="glg"><input type="checkbox" data-t="${t}"><span class="gsw" style="background:${c}"></span>${t}</label>`).join('')}
+      <label class="glg"><input type="checkbox" data-t="__all"><span class="gsw" style="background:#7b8ba3"></span>전체 기업</label>
       <label class="glg"><input type="checkbox" data-t="__ext"><span class="gsw" style="background:#55657d"></span>커버 밖</label>
     </div>
     <div class="bstrip">
@@ -529,8 +581,21 @@ function drawGraph(g) {
   const rowY = {}; layers.forEach((l, i) => rowY[l] = 80 + i * ((H - 210) / Math.max(1, layers.length - 1)));
   rowY['커버 밖'] = H - 40;
 
+  const showAll = () => { const i = $('.glg input[data-t="__all"]'); return i ? i.checked : false; };
   function layout() {
-    const vis = g.nodes.filter(n => !n.external || showExt());
+    let vis = g.nodes.filter(n => !n.external || showExt());
+    if (!showAll()) {
+      // 가독성 기본값: 층별 상위 5 + 논제 걸린 기업 + 선택 기업만 (전체는 토글)
+      const byL = {};
+      vis.forEach(n => (byL[n.layer] ||= []).push(n));
+      const keep = new Set();
+      for (const ns of Object.values(byL)) {
+        ns.sort((a, b) => (b.mentions || 0) - (a.mentions || 0));
+        ns.slice(0, 5).forEach(n => keep.add(n.id));
+        ns.forEach(n => { if ((n.theses_ids || []).length || n.id === sel) keep.add(n.id); });
+      }
+      vis = vis.filter(n => keep.has(n.id));
+    }
     const byLayer = {};
     vis.forEach(n => (byLayer[n.layer] ||= []).push(n));
     for (const [l, ns] of Object.entries(byLayer)) {
@@ -553,7 +618,8 @@ function drawGraph(g) {
   let sel = null;
   function render() {
     const visSet = layout();
-    const links = g.links.filter(e => visSet.has(e.s) && visSet.has(e.t) && (EDGE_COLOR[e.type] ? typeOn(e.type) : true));
+    const anyRel = Object.keys(EDGE_COLOR).some(t => typeOn(t));
+    const links = g.links.filter(e => visSet.has(e.s) && visSet.has(e.t) && (EDGE_COLOR[e.type] ? typeOn(e.type) : anyRel));
     const N = Object.fromEntries(g.nodes.map(n => [n.id, n]));
     const conn = new Set();
     if (sel) links.forEach(e => { if (e.s === sel || e.t === sel) { conn.add(e.s); conn.add(e.t); } });
@@ -577,10 +643,15 @@ function drawGraph(g) {
       </g>`;
     }).join('');
     const bandList = [...layers, ...(showExt() ? ['커버 밖'] : [])];
-    const rowsSvg = bandList.map((l, i) =>
-      `<rect x="0" y="${(rowY[l] ?? H - 40) - 40}" width="${W}" height="80" fill="${i % 2 ? '#0f1a2d' : 'transparent'}" opacity=".55"/>
+    const statusMap = Object.fromEntries((g.layer_status || []).map(s => [s.layer, s]));
+    const rowsSvg = bandList.map((l, i) => {
+      const st = statusMap[l];
+      const stColor = st ? (st['정확도'] === '정독실측' ? '#e8c97b' : st['정확도'] === '렌즈스냅샷' ? '#8fa5c4' : '#54677f') : '#54677f';
+      return `<rect x="0" y="${(rowY[l] ?? H - 40) - 40}" width="${W}" height="80" fill="${i % 2 ? '#0f1a2d' : 'transparent'}" opacity=".55"/>
        <text x="${PADX - 12}" y="${(rowY[l] ?? H - 40) + 4}" font-size="12" fill="#6d87a8" text-anchor="end" font-weight="600">${esc(l)}</text>
-       <line x1="${PADX - 4}" x2="${W}" y1="${rowY[l]}" y2="${rowY[l]}" stroke="#16233a" stroke-width="1"/>`).join('');
+       ${st ? `<text x="${W - 14}" y="${(rowY[l] ?? H - 40) - 24}" font-size="10.5" fill="${stColor}" text-anchor="end" style="paint-order:stroke;stroke:#0d1626;stroke-width:3px">${esc(st['상태'])}</text>` : ''}
+       <line x1="${PADX - 4}" x2="${W}" y1="${rowY[l]}" y2="${rowY[l]}" stroke="#16233a" stroke-width="1"/>`;
+    }).join('');
     // 돈의 흐름 레인 (좌측): 층→층 정량 엣지. 기업 앵커가 둘 다 있으면 노드 간 직접 연결.
     let moneySvg = '';
     if (showMoney()) {
@@ -737,7 +808,7 @@ async function boot2() {
     $('#n-sap').textContent = Object.keys(sap.companies).length;
     $('#n-graph').textContent = g.nodes.length;
   } catch (e) { console.warn(e); }
-  route(location.hash.slice(1) || '/graph');
+  route(location.hash.slice(1) || '/brief');
 }
 (async function boot() {
   $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') location.hash = '#/search/' + encodeURIComponent($('#q').value); });
