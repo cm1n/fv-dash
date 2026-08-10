@@ -297,6 +297,7 @@ table.ch td,table.ch th{padding:8px 12px;font-size:13px}
 table.ch td:first-child{font-size:13.5px}
 .dim{color:var(--faint)}
 .lmore summary{cursor:pointer;color:var(--sub);font-size:12.5px;padding:7px 18px}
+td.thx{font-size:13.5px;line-height:1.55;color:var(--ink-2);max-width:640px}
 .mgap{padding:8px 6px 8px 34px;display:flex;flex-direction:column;gap:3px;margin-bottom:8px}
 .mflow{font-size:13px;color:var(--ink-2);line-height:1.5}
 .mflow .ar{color:var(--gold);font-weight:700;margin-right:6px}

@@ -212,8 +212,7 @@ routes.chain = async main => {
       <td><b>${esc(n.label)}</b> <span class="tick">${esc(n.ticker)}</span></td>
       <td>${ratingTag(n.rating) || '<span class="dim">—</span>'}</td>
       ${yoyCell(q.rev_yoy)}${cell(q.gpm, '%')}${cell(q.opm, '%')}${cell(f.capex_pct, '%')}
-      ${share(n.id)}
-      <td class="num dim">${fmt(n.mentions)}</td></tr>`;
+      ${share(n.id)}</tr>`;
   };
 
   const layerHead = l => {
@@ -239,7 +238,13 @@ routes.chain = async main => {
       ${(() => { const a = Object.values(EC).find(c => c.edgar)?.edgar?.asof; return a ? `— 수집 기준 ${a}, 하루 2회 자동 갱신` : ''; })()}
       · 점유율 = 산업 DB · 셀 위에 마우스를 올리면 출처. 행 클릭 = 종목 원장.</p>
     ${layers.map(l => {
-      const ns = (byLayer[l] || []).sort((a, b) => b.mentions - a.mentions);
+      // 정렬도 내용 기준: 등급(OW 먼저) → 성장률. 카운트는 표에서 뺐다(2026-08-10 지적).
+      const ns = (byLayer[l] || []).sort((a, b) => {
+        const ow = x => /^over/i.test(x.rating) ? 0 : /^under/i.test(x.rating) ? 2 : 1;
+        if (ow(a) !== ow(b)) return ow(a) - ow(b);
+        const gy = x => ((EC[x.id] || {}).edgar || {}).q?.rev_yoy ?? -999;
+        return gy(b) - gy(a);
+      });
       if (!ns.length) return '';
       const top = ns.slice(0, 10), rest = ns.slice(10);
       return `
@@ -247,7 +252,7 @@ routes.chain = async main => {
         <div class="lh"><h3>${esc(l)}</h3>${layerHead(l)}<span class="lh-n">${ns.length}개사</span></div>
         <table class="tb ch"><thead><tr>
           <th>기업</th><th>등급</th><th class="num">매출 YoY</th><th class="num">GPM</th><th class="num">OPM</th>
-          <th class="num">capex/매출</th><th class="num">점유율</th><th class="num">언급</th></tr></thead>
+          <th class="num">capex/매출</th><th class="num">점유율</th></tr></thead>
           <tbody>${top.map(compRow).join('')}</tbody></table>
         ${rest.length ? `<details class="lmore"><summary>+${rest.length}개사 더</summary>
           <table class="tb ch"><tbody>${rest.map(compRow).join('')}</tbody></table></details>` : ''}
@@ -528,44 +533,45 @@ routes.sapiens = async (main, [name]) => {
   const sap = await data('sapiens');
   if (name && sap.companies[name]) return sapiensDetail(main, sap, name);
   const list = Object.values(sap.companies);
+  // 내용이 1급: 각 행의 몸통은 카운트가 아니라 저자의 최신 주장 문장
+  list.forEach(c => {
+    const t = (c.theses || [])[c.theses.length - 1];
+    const p = (c.timeline || [])[c.timeline.length - 1];
+    c._txt = t ? t.text : (p && p.snippet) || '';
+    c._d = t ? t.date : (p && p.date) || '';
+    c._deep = c.theses.length + c.key_numbers.length;
+  });
   main.innerHTML = `<div class="wrap xl">
     <div class="phead"><h2>종목 트래커</h2></div>
-    <p class="plede">SAPIENS(올바른) 코퍼스 ${fmt(sap.scanned)}편 전량 스캔 — 종목별 언급·등급·논지 원장. 행을 누르면 종목 원장이 열린다.</p>
+    <p class="plede">종목별 저자의 최신 주장 — SAPIENS 코퍼스 ${fmt(sap.scanned)}편에서 추출. 행을 누르면 논지·숫자·판별점 전체 원장이 열린다.</p>
     <div class="filters">
-      <input id="sf" type="search" placeholder="종목명 · 티커">
+      <input id="sf" type="search" placeholder="종목명 · 티커 · 논지 내용">
       <button class="chip on" data-s="all">전체</button>
       <button class="chip" data-s="ow">Overweight만</button>
       <button class="chip" data-s="deep">심층추출 보유</button>
       <span class="count" id="scnt"></span></div>
     <div class="tbwrap"><table class="tb" id="st"><thead><tr>
-      <th data-k="name">종목</th><th data-k="layer">층</th>
-      <th data-k="latest_rating">등급</th>
-      <th class="num" data-k="mention_total" data-n>언급</th>
-      <th class="num" data-k="mention_posts" data-n>글 수</th>
-      <th>월별 추이</th>
-      <th data-k="last">최근 언급</th><th class="num" data-k="_deep" data-n>논지·숫자</th>
+      <th data-k="name" style="width:150px">종목</th>
+      <th data-k="layer" style="width:110px">층</th>
+      <th data-k="latest_rating" style="width:110px">등급</th>
+      <th data-k="_txt">최신 논지 (저자 주장)</th>
+      <th class="num" data-k="_d" style="width:96px">날짜</th>
     </tr></thead><tbody></tbody></table></div></div>`;
-  list.forEach(c => c._deep = c.theses.length + c.key_numbers.length);
-  list.sort((a, b) => b.mention_total - a.mention_total);
+  list.sort((a, b) => (b._d || '').localeCompare(a._d || ''));
   let mode = 'all';
   const render = () => {
     const q = $('#sf').value.toLowerCase();
     const hit = list.filter(c =>
       (mode !== 'ow' || /^over/i.test(c.latest_rating)) &&
       (mode !== 'deep' || c._deep > 0) &&
-      (!q || c.name.toLowerCase().includes(q) || (c.ticker || '').toLowerCase().includes(q)));
+      (!q || c.name.toLowerCase().includes(q) || (c.ticker || '').toLowerCase().includes(q) || c._txt.toLowerCase().includes(q)));
     $('#scnt').textContent = hit.length + ' 종목';
-    $('#st tbody').innerHTML = hit.map(c => {
-      const s = monthlySeries(c.timeline);
-      return `<tr data-n="${esc(c.name)}" style="cursor:pointer">
+    $('#st tbody').innerHTML = hit.map(c => `<tr data-n="${esc(c.name)}" style="cursor:pointer">
       <td><b>${esc(c.name)}</b> <span class="tick">${esc(c.ticker)}</span></td>
       <td><span class="tag line">${esc(c.layer || '—')}</span></td>
       <td>${ratingTag(c.latest_rating) || '<span style="color:var(--faint)">—</span>'}</td>
-      <td class="num">${fmt(c.mention_total)}</td><td class="num">${c.mention_posts}</td>
-      <td>${spark(s.vals, 130, 24)}</td>
-      <td class="num">${c.last || ''}</td>
-      <td class="num">${c._deep ? c.theses.length + '·' + c.key_numbers.length : '<span style="color:var(--faint)">대기</span>'}</td></tr>`;
-    }).join('');
+      <td class="thx">${esc(c._txt) || '<span style="color:var(--faint)">추출 대기 — 원문 raw/clips</span>'}</td>
+      <td class="num">${c._d || ''}</td></tr>`).join('');
     $('#st tbody').querySelectorAll('tr').forEach(r => r.onclick = () => location.hash = '#/sapiens/' + encodeURIComponent(r.dataset.n));
   };
   $('#sf').oninput = render;
