@@ -149,7 +149,7 @@ function route(path) {
     console.error(e);
   });
 }
-window.addEventListener('hashchange', () => route(location.hash.slice(1) || '/home'));
+window.addEventListener('hashchange', () => route(location.hash.slice(1) || '/graph'));
 
 /* ---------------------------------------------------------------- 홈 */
 routes.home = async main => {
@@ -227,12 +227,27 @@ function calRow(c) {
 }
 routes.calendar = async main => {
   const cal = await data('catalysts');
-  const up = cal.filter(c => !c.past), past = cal.filter(c => c.past);
   main.innerHTML = `<div class="phead"><h2>판별점 캘린더</h2>
-    <div class="desc">각 리서치의 "날짜 붙은 판정 조건" — db/catalysts.csv</div></div>
-    <div class="card" style="overflow:hidden"><div class="cal">${up.map(calRow).join('')}</div></div>
-    <h3 style="margin:20px 0 8px;font-size:14px;color:var(--sub)">지난 판별점</h3>
-    <div class="card" style="overflow:hidden"><div class="cal">${past.map(calRow).join('')}</div></div>`;
+    <div class="desc">날짜 붙은 판정 조건 — db/판단/판별점.csv (본체 = AI밸류체인·내 리서치 / 회사 = 지시 업무)</div>
+    <div class="right">
+      <button class="chip on" data-tr="본체">본체</button>
+      <button class="chip" data-tr="회사">회사 업무</button>
+      <button class="chip" data-tr="">전체</button></div></div>
+    <div id="calbody"></div>`;
+  let tr = '본체';
+  const render = () => {
+    const rows = cal.filter(c => !tr || (c['트랙'] || '본체') === tr);
+    const up = rows.filter(c => !c.past), past = rows.filter(c => c.past);
+    $('#calbody').innerHTML = `
+      <div class="card" style="overflow:hidden"><div class="cal">${up.map(calRow).join('') || '<div class="empty">예정 없음</div>'}</div></div>
+      <h3 style="margin:20px 0 8px;font-size:14px;color:var(--sub)">지난 판별점</h3>
+      <div class="card" style="overflow:hidden"><div class="cal">${past.map(calRow).join('') || '<div class="empty">—</div>'}</div></div>`;
+  };
+  main.querySelectorAll('.chip').forEach(ch => ch.onclick = () => {
+    main.querySelectorAll('.chip').forEach(x => x.classList.remove('on'));
+    ch.classList.add('on'); tr = ch.dataset.tr; render();
+  });
+  render();
 };
 
 /* ---------------------------------------------------------------- 문서 */
@@ -465,26 +480,43 @@ async function sapiensDetail(main, sap, name) {
 const EDGE_COLOR = { '공급': '#5b8def', '경쟁': '#e0525f', '투자': '#b07ce8', '파트너': '#46b8a5' };
 routes.graph = async main => {
   const g = await data('graph');
+  const bstrip = g.bottleneck_strip || [];
+  const order = g.bucket_order || [];
+  // 최근 3개월 최다 버킷 = 현재 병목 위치
+  const recent = bstrip.slice(-3);
+  const heat = Object.fromEntries(order.map(b => [b, bstrip.reduce((s, m) => s + (m[b] || 0), 0)]));
+  const recentHeat = Object.fromEntries(order.map(b => [b, recent.reduce((s, m) => s + (m[b] || 0), 0)]));
+  const hot = order.reduce((a, b) => (recentHeat[b] || 0) > (recentHeat[a] || 0) ? b : a, order[0]);
   main.innerHTML = `
   <div class="gwrap">
     <div class="gbar">
-      <b>AI밸류체인 관계 그래프</b>
-      <span class="gsub">노드 ${g.nodes.length} · 관계 ${g.links.length} — 수요(위) → 공급(아래), 크기 = 언급량</span>
+      <b>AI밸류체인 지도</b>
+      <span class="gsub">기업 ${g.nodes.length} · 관계 ${g.links.length} · 돈의 흐름 ${(g.money || []).length} — 수요(위)→공급(아래), 크기=커버 가중치</span>
       <span class="gsub" id="gsel"></span>
       <div style="flex:1"></div>
+      <label class="glg"><input type="checkbox" checked data-t="__money"><span class="gsw" style="background:#e8b84b"></span>돈의 흐름</label>
       ${Object.entries(EDGE_COLOR).map(([t, c]) => `<label class="glg"><input type="checkbox" checked data-t="${t}"><span class="gsw" style="background:${c}"></span>${t}</label>`).join('')}
       <label class="glg"><input type="checkbox" data-t="__ext"><span class="gsw" style="background:#55657d"></span>커버 밖</label>
     </div>
-    <div class="gcanvas" id="gc"></div>
+    <div class="bstrip">
+      <span class="bt">병목 이동</span>
+      ${order.map((b, i) => `${i ? '<span class="barr">→</span>' : ''}<span class="bnode${b === hot ? ' hot' : ''}" title="누적 주장 ${heat[b] || 0}건 · 최근 3개월 ${recentHeat[b] || 0}건">${b}<small>${heat[b] || 0}</small></span>`).join('')}
+      <span class="bnote">코퍼스 병목 주장 ${bstrip.reduce((s, m) => s + order.reduce((x, b) => x + (m[b] || 0), 0), 0)}건 버킷팅 · 강조 = 최근 3개월 최다</span>
+    </div>
+    <div class="gbody">
+      <div class="gcanvas" id="gc"></div>
+      <aside class="gside" id="gside"><div class="empty">기업을 클릭하면 논제·판별점·상세가 여기 열립니다</div></aside>
+    </div>
     <div class="gtip" id="gtip"></div>
   </div>`;
   drawGraph(g);
 };
 function drawGraph(g) {
-  const box = $('#gc'), tip = $('#gtip');
+  const box = $('#gc'), tip = $('#gtip'), side = $('#gside');
   const showExt = () => $('.glg input[data-t="__ext"]').checked;
+  const showMoney = () => $('.glg input[data-t="__money"]').checked;
   const typeOn = t => { const i = $(`.glg input[data-t="${CSS.escape(t)}"]`); return i ? i.checked : true; };
-  const W = 1780, H = 1150, PADX = 60;
+  const W = 1780, H = 1150, PADX = 200;   // 좌측은 돈의 흐름 레인
   const layers = g.layers.filter(l => l !== '커버 밖');
   const rowY = {}; layers.forEach((l, i) => rowY[l] = 80 + i * ((H - 210) / Math.max(1, layers.length - 1)));
   rowY['커버 밖'] = H - 40;
@@ -536,14 +568,57 @@ function drawGraph(g) {
         ${label ? `<text y="${r + 12}" text-anchor="middle" font-size="10.5" fill="#c6d4ea" style="paint-order:stroke;stroke:#0d1626;stroke-width:3px;font-weight:600">${esc(n.label)}</text>` : ''}
       </g>`;
     }).join('');
-    const rowsSvg = [...layers, ...(showExt() ? ['커버 밖'] : [])].map(l =>
-      `<text x="10" y="${(rowY[l] ?? H - 40) + 4}" font-size="11" fill="#546d8a">${esc(l)}</text>
-       <line x1="0" x2="${W}" y1="${rowY[l]}" y2="${rowY[l]}" stroke="#16233a" stroke-width="1"/>`).join('');
+    const bandList = [...layers, ...(showExt() ? ['커버 밖'] : [])];
+    const rowsSvg = bandList.map((l, i) =>
+      `<rect x="0" y="${(rowY[l] ?? H - 40) - 40}" width="${W}" height="80" fill="${i % 2 ? '#0f1a2d' : 'transparent'}" opacity=".55"/>
+       <text x="${PADX - 12}" y="${(rowY[l] ?? H - 40) + 4}" font-size="12" fill="#6d87a8" text-anchor="end" font-weight="600">${esc(l)}</text>
+       <line x1="${PADX - 4}" x2="${W}" y1="${rowY[l]}" y2="${rowY[l]}" stroke="#16233a" stroke-width="1"/>`).join('');
+    // 돈의 흐름 레인 (좌측): 층→층 정량 엣지. 기업 앵커가 둘 다 있으면 노드 간 직접 연결.
+    let moneySvg = '';
+    if (showMoney()) {
+      const laneX = {}; let li = 0;
+      for (const m of (g.money || [])) {
+        const a = rowY[m.from_layer], b = rowY[m.to_layer];
+        if (a == null || b == null) continue;
+        const na = m.from_co && N[m.from_co] && visSet.has(m.from_co) ? N[m.from_co] : null;
+        const nb = m.to_co && N[m.to_co] && visSet.has(m.to_co) ? N[m.to_co] : null;
+        const conf = m['정확도'] === '정독실측' ? 1 : m['정확도'] === '렌즈스냅샷' ? .6 : .35;
+        if (na && nb) {
+          const mx = (na.x + nb.x) / 2 + 30, my = (na.y + nb.y) / 2;
+          moneySvg += `<path d="M${na.x},${na.y} Q${mx + 60},${my} ${nb.x},${nb.y}" fill="none" stroke="#e8b84b" stroke-width="3" opacity="${.55 * conf + .25}" marker-end="url(#arm)" class="gm" data-m="${esc(m.id)}"/>
+            <text x="${mx + 46}" y="${my - 6}" font-size="10.5" fill="#e8c97b" text-anchor="middle" style="paint-order:stroke;stroke:#0d1626;stroke-width:3px">${esc(m.value)}</text>`;
+        } else {
+          const x = 36 + (li % 3) * 52; li++;
+          const dir = b > a ? 1 : -1;
+          moneySvg += `<path d="M${x},${a + 14 * dir} C${x - 18},${(a + b) / 2} ${x - 18},${(a + b) / 2} ${x},${b - 22 * dir}" fill="none" stroke="#e8b84b" stroke-width="4" opacity="${.5 * conf + .2}" marker-end="url(#arm)" class="gm" data-m="${esc(m.id)}"/>
+            <text x="${x + 8}" y="${(a + b) / 2 + 4}" font-size="10.5" fill="#e8c97b" style="paint-order:stroke;stroke:#0d1626;stroke-width:3px">${esc((m.label || '').slice(0, 14))}</text>`;
+        }
+      }
+    }
     box.innerHTML = `<svg id="gsvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
-      <defs><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5.5" markerHeight="5.5" orient="auto"><path d="M0,0L8,4L0,8z" fill="#8ba3c7"/></marker></defs>
-      <g id="gz">${rowsSvg}${edgeSvg}${nodeSvg}</g></svg>`;
+      <defs><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5.5" markerHeight="5.5" orient="auto"><path d="M0,0L8,4L0,8z" fill="#8ba3c7"/></marker>
+      <marker id="arm" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0L8,4L0,8z" fill="#e8b84b"/></marker></defs>
+      <g id="gz">${rowsSvg}${moneySvg}${edgeSvg}${nodeSvg}</g></svg>`;
+    box.querySelectorAll('.gm').forEach(mEl => {
+      mEl.onmouseenter = ev => {
+        const m = (g.money || []).find(x => x.id === mEl.dataset.m);
+        if (!m) return;
+        tip.style.display = 'block';
+        tip.innerHTML = `<b style="color:#e8c97b">₩ ${esc(m.label)}</b><br>${esc(m.from_co || m.from_layer)} → ${esc(m.to_co || m.to_layer)}<br>
+          <b>${esc(m.value)}</b>${m['시차'] ? ' · 시차 ' + esc(m['시차']) : ''}<br>
+          <span style="opacity:.65">${esc(m['출처'])} · ${esc(m['정확도'])}</span>`;
+      };
+      mEl.onmousemove = ev => { tip.style.left = Math.min(window.innerWidth - 260, ev.clientX + 14) + 'px'; tip.style.top = (ev.clientY + 14) + 'px'; };
+      mEl.onmouseleave = () => tip.style.display = 'none';
+    });
     box.querySelectorAll('.gn').forEach(n => {
-      n.onclick = e => { e.stopPropagation(); sel = sel === n.dataset.id ? null : n.dataset.id; $('#gsel').textContent = sel ? sel + ' 선택 — 다시 클릭하면 해제, 더블클릭 = 상세' : ''; render(); };
+      n.onclick = e => {
+        e.stopPropagation();
+        sel = sel === n.dataset.id ? null : n.dataset.id;
+        $('#gsel').textContent = sel ? sel + ' — 연결 하이라이트 중' : '';
+        if (sel) sidePanel(sel); else side.innerHTML = '<div class="empty">기업을 클릭하면 논제·판별점·상세가 여기 열립니다</div>';
+        render();
+      };
       n.ondblclick = () => location.hash = '#/sapiens/' + encodeURIComponent(n.dataset.id);
       n.onmouseenter = ev => {
         const nd = g.nodes.find(x => x.id === n.dataset.id);
@@ -556,7 +631,28 @@ function drawGraph(g) {
       n.onmousemove = ev => { tip.style.left = Math.min(window.innerWidth - 240, ev.clientX + 14) + 'px'; tip.style.top = (ev.clientY + 14) + 'px'; };
       n.onmouseleave = () => tip.style.display = 'none';
     });
-    box.querySelector('#gsvg').onclick = () => { if (sel) { sel = null; $('#gsel').textContent = ''; render(); } };
+    box.querySelector('#gsvg').onclick = () => { if (sel) { sel = null; $('#gsel').textContent = ''; side.innerHTML = '<div class="empty">기업을 클릭하면 논제·판별점·상세가 여기 열립니다</div>'; render(); } };
+  }
+  function sidePanel(id) {
+    const nd = g.nodes.find(x => x.id === id);
+    if (!nd) return;
+    const myTheses = (g.theses || []).filter(t => (nd.theses_ids || []).includes(t.id));
+    const myMoney = (g.money || []).filter(m => m.from_co === id || m.to_co === id ||
+      m.from_layer === nd.layer || m.to_layer === nd.layer).slice(0, 5);
+    side.innerHTML = `
+      <div class="sp-h"><b>${esc(nd.label)}</b> <span class="tag line">${esc(nd.ticker || '')}</span>
+        ${ratingTag(nd.rating)}<div style="flex:1"></div>
+        <a class="btn" href="#/sapiens/${encodeURIComponent(id)}">종목 원장 →</a></div>
+      <div class="sp-meta">${esc(nd.layer)} · 코퍼스 언급 ${fmt(nd.mentions)}회 · 관계 ${nd.deg}건 · 논지 ${nd.theses || 0}</div>
+      <h4>걸린 논제</h4>
+      ${myTheses.length ? myTheses.map(t => {
+        const cps = (g.thesis_cps || {})[t.id] || [];
+        return `<div class="sp-th"><div class="sp-tt">${esc(t.id)} · ${esc(t['요지'])}</div>
+          ${cps.map(c => `<div class="sp-cp${c['판정'] ? ' done' : ''}">⚑ ${esc(c.date)} ${esc(c.name)} — ${esc(c.event)}${c['판정'] ? ` <b>[${esc(c['판정'])}]</b>` : ''}</div>`).join('')}</div>`;
+      }).join('') : '<div class="empty" style="padding:12px">아직 이 기업/층에 개설된 논제 없음 — 정독 진행 중</div>'}
+      <h4>지나는 돈의 흐름</h4>
+      ${myMoney.length ? myMoney.map(m => `<div class="sp-mo"><b>${esc(m.value)}</b> — ${esc(m.label)}<br>
+        <span>${esc(m.from_co || m.from_layer)} → ${esc(m.to_co || m.to_layer)} · ${esc(m['정확도'])}</span></div>`).join('') : '<div class="empty" style="padding:12px">—</div>'}`;
   }
   // 줌·팬
   let vb = null, drag = null;
@@ -633,7 +729,7 @@ async function boot2() {
     $('#n-sap').textContent = Object.keys(sap.companies).length;
     $('#n-graph').textContent = g.nodes.length;
   } catch (e) { console.warn(e); }
-  route(location.hash.slice(1) || '/home');
+  route(location.hash.slice(1) || '/graph');
 }
 (async function boot() {
   $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') location.hash = '#/search/' + encodeURIComponent($('#q').value); });

@@ -234,3 +234,31 @@ table.tb td.num,table.tb th.num{text-align:right;font-variant-numeric:tabular-nu
 .gatebox .btn{width:100%;height:36px}
 .gateerr{color:var(--up);font-size:11.5px;margin-top:9px;min-height:15px}
 .hrow:hover{background:var(--surface-2);border-radius:6px}
+
+/* ------------------------------------------------------------------ 밸류체인 지도 v2 */
+.bstrip{display:flex;align-items:center;gap:8px;padding:7px 16px;background:#101b30;
+  border-bottom:1px solid #1b2a44;flex-wrap:wrap;flex:none}
+.bstrip .bt{font-size:11px;color:#7d93b3;letter-spacing:.05em;font-weight:600}
+.bnode{display:inline-flex;align-items:baseline;gap:5px;padding:3px 12px;border-radius:999px;
+  background:#182740;color:#b9cbe6;font-size:12px;font-weight:600;border:1px solid #24395c}
+.bnode small{font-size:10px;color:#7d93b3;font-family:var(--mono)}
+.bnode.hot{background:#3d2f12;border-color:#8a6a1f;color:#f0cf7d;box-shadow:0 0 12px rgba(232,184,75,.25)}
+.barr{color:#4c6182;font-size:12px}
+.bnote{margin-left:auto;font-size:10.5px;color:#5c7291}
+.gbody{flex:1;display:flex;min-height:0}
+.gbody .gcanvas{flex:1}
+.gside{width:308px;flex:none;background:#0f1728;border-left:1px solid #1b2a44;overflow-y:auto;
+  padding:14px;color:#c9d7ec}
+.gside .empty{color:#5c7291}
+.gside h4{margin:16px 0 7px;font-size:11px;color:#7d93b3;letter-spacing:.06em;text-transform:uppercase}
+.sp-h{display:flex;align-items:center;gap:7px;font-size:15px}
+.sp-h .btn{background:#182740;border-color:#2a4066;color:#a9c2e8;font-size:11px}
+.sp-meta{font-size:11px;color:#7d93b3;margin-top:5px}
+.sp-th{background:#131f36;border:1px solid #1f3151;border-radius:8px;padding:9px 11px;margin-bottom:7px}
+.sp-tt{font-size:12px;line-height:1.5}
+.sp-cp{font-size:11px;color:#d8b96a;margin-top:6px;line-height:1.45}
+.sp-cp.done{color:#7fc79a}
+.sp-mo{background:#171f2e;border-left:3px solid #e8b84b;border-radius:5px;padding:7px 10px;
+  margin-bottom:6px;font-size:11.5px;line-height:1.5}
+.sp-mo span{color:#8298b8;font-size:10.5px}
+@media (max-width:1100px){.gside{display:none}}
