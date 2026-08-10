@@ -165,7 +165,23 @@ function route(path) {
     console.error(e);
   });
 }
-window.addEventListener('hashchange', () => route(location.hash.slice(1) || '/today'));
+window.addEventListener('hashchange', () => route(location.hash.slice(1) || '/graph'));
+
+/* ---------------------------------------------------------------- 경제 지표 헬퍼 */
+const usdm = v => v == null ? '—' : (Math.abs(v) >= 1000 ? '$' + (v / 1000).toFixed(1) + 'B' : '$' + Math.round(v) + 'M');
+const sgn = v => v == null ? '—' : (v > 0 ? '+' : '') + v + '%';
+function edgarLines(e) {
+  if (!e) return '';
+  const q = e.q, f = e.fy;
+  return `${q ? `<div class="ec-line"><b>최근분기</b> (${q.end}) 매출 ${usdm(q.rev)} · YoY <b>${sgn(q.rev_yoy)}</b> · GPM <b>${q.gpm ?? '—'}%</b> · OPM <b>${q.opm ?? '—'}%</b></div>` : ''}
+  ${f ? `<div class="ec-line"><b>FY${f.fy || ''}</b> 매출 ${usdm(f.rev)} (${sgn(f.rev_yoy)}) · capex ${usdm(f.capex)}${f.capex_pct != null ? ` (매출의 ${f.capex_pct}%)` : ''}</div>` : ''}
+  <div class="ec-src">SEC EDGAR XBRL · ${e.asof || ''}</div>`;
+}
+function metricRows(list, n = 5) {
+  return (list || []).slice(0, n).map(m =>
+    `<div class="ec-m"><b>${esc(m.value)}${esc(m.unit ? ' ' + m.unit : '')}</b> — ${esc(m.metric)}
+     <span>${esc(m.period)} · ${esc(m.src)} ${esc(m.date)}</span></div>`).join('');
+}
 
 /* ---------------------------------------------------------------- 오늘 (기본 화면)
    구성 원칙: 시스템 지표(정독·확인율·문서 수)는 메타 한 줄로 강등하고,
@@ -488,6 +504,8 @@ async function sapiensDetail(main, sap, name) {
   const evs = sap.ratings_events.filter(e => e.company === name);
   const s = monthlySeries(c.timeline);
   const rel = c.relations || [];
+  let ec = {};
+  try { ec = ((await data('econ')).companies || {})[name] || {}; } catch { }
   const sec = (title, body) => `<div class="card" style="padding:16px 18px"><h3 style="margin:0 0 10px;font-size:15px">${title}</h3>${body}</div>`;
   main.innerHTML = `<div class="wrap xl">
   <div class="phead"><a class="btn" href="#/sapiens">← 목록</a><h2>${esc(name)}</h2>
@@ -503,6 +521,11 @@ async function sapiensDetail(main, sap, name) {
     <div class="stat"><div class="num">${evs.length}<small>건</small></div><div class="lab">등급 언급 이벤트</div><div class="sub">본문 등급 문장 기준</div></div>
   </div>
 
+  ${ec.edgar ? sec('재무 팩트 (SEC EDGAR XBRL)', `<div style="font-size:14px;line-height:1.9">${edgarLines(ec.edgar)}</div>`) : ''}
+  ${(ec.metrics || []).length ? sec(`산업 DB 지표 ${ec.metrics.length}건 <span style="font-weight:400;font-size:12px;color:var(--faint)">db/industry — 점유율·성장률·capex·TAM, 빈티지 태그</span>`,
+    `<div class="ec-grid">${metricRows(ec.metrics, 24)}</div>`) : ''}
+  ${(ec.consensus || []).length ? sec(`컨센서스 아카이브 ${ec.consensus.length}건`, `<table class="tb"><thead><tr><th>지표</th><th>기간</th><th>값</th><th>출처</th><th>추출</th></tr></thead><tbody>
+    ${ec.consensus.map(k => `<tr><td>${esc(k.metric)}</td><td class="num">${esc(k.period)}</td><td class="num"><b>${esc(k.value)} ${esc(k.unit)}</b></td><td>${esc(k.src)} ${esc(k.date)}</td><td>${esc(k.method)}</td></tr>`).join('')}</tbody></table>`) : ''}
   ${sec('주간전략 Overweight 이력', owStrip(name, sap.weekly_ow) || '<div class="empty">주간 데이터 없음</div>')}
 
   <div class="grid" style="grid-template-columns:1.2fr .8fr;align-items:start;margin-top:16px">
@@ -726,17 +749,26 @@ function drawGraph(g) {
     });
     box.querySelector('#gsvg').onclick = () => { if (sel) { sel = null; $('#gsel').textContent = ''; side.innerHTML = '<div class="empty">기업을 클릭하면 논제·판별점·돈흐름이 여기 열립니다</div>'; render(); } };
   }
-  function sidePanel(id) {
+  async function sidePanel(id) {
     const nd = g.nodes.find(x => x.id === id);
     if (!nd) return;
     const myTheses = (g.theses || []).filter(t => (nd.theses_ids || []).includes(t.id));
     const myMoney = (g.money || []).filter(m => m.from_co === id || m.to_co === id ||
       m.from_layer === nd.layer || m.to_layer === nd.layer).slice(0, 5);
+    let ec = {}, layEc = [];
+    try {
+      const econ = await data('econ');
+      ec = (econ.companies || {})[id] || {};
+      layEc = (econ.layers || {})[nd.layer] || [];
+    } catch { /* econ 없으면 나머지만 */ }
     side.innerHTML = `
       <div class="sp-h"><b>${esc(nd.label)}</b> <span class="tag line" style="border-color:#2a4066;color:#9cb4d8">${esc(nd.ticker || '')}</span>
         ${ratingTag(nd.rating)}<div style="flex:1"></div>
         <a class="btn" href="#/sapiens/${encodeURIComponent(id)}">종목 원장 →</a></div>
       <div class="sp-meta">${esc(nd.layer)} · 코퍼스 언급 ${fmt(nd.mentions)}회 · 관계 ${nd.deg}건 · 논지 ${nd.theses || 0}</div>
+      ${ec.edgar ? `<h4>재무 (SEC EDGAR)</h4><div class="sp-ec">${edgarLines(ec.edgar)}</div>` : ''}
+      ${(ec.metrics || []).length ? `<h4>산업 DB 지표</h4><div class="sp-ec">${metricRows(ec.metrics, 4)}</div>` : ''}
+      ${(ec.consensus || []).length ? `<div class="sp-meta" style="margin-top:6px">컨센서스 아카이브 ${ec.consensus.length}건 — 종목 원장에서 전체</div>` : ''}
       <h4>걸린 논제</h4>
       ${myTheses.length ? myTheses.map(t => {
         const cps = (g.thesis_cps || {})[t.id] || [];
@@ -745,7 +777,8 @@ function drawGraph(g) {
       }).join('') : '<div class="empty" style="padding:12px">아직 이 기업/층에 개설된 논제 없음 — 정독 진행 중</div>'}
       <h4>지나는 돈의 흐름</h4>
       ${myMoney.length ? myMoney.map(m => `<div class="sp-mo"><b>${esc(m.value)}</b> — ${esc(m.label)}<br>
-        <span>${esc(m.from_co || m.from_layer)} → ${esc(m.to_co || m.to_layer)} · ${esc(m['정확도'])}</span></div>`).join('') : '<div class="empty" style="padding:12px">—</div>'}`;
+        <span>${esc(m.from_co || m.from_layer)} → ${esc(m.to_co || m.to_layer)} · ${esc(m['정확도'])}</span></div>`).join('') : '<div class="empty" style="padding:12px">—</div>'}
+      ${layEc.length ? `<h4>${esc(nd.layer)} 산업 지표</h4><div class="sp-ec">${metricRows(layEc, 3)}</div>` : ''}`;
   }
   // 줌·팬
   let vb = null, drag = null;
@@ -835,7 +868,7 @@ async function boot2() {
     $('#topmeta').textContent = `빌드 ${man.built.slice(0, 16).replace('T', ' ')} · ${man.commit}`;
     $('#n-docs').textContent = man.counts.docs;
   } catch (e) { console.warn(e); }
-  route(location.hash.slice(1) || '/today');
+  route(location.hash.slice(1) || '/graph');
 }
 (async function boot() {
   $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') location.hash = '#/search/' + encodeURIComponent($('#q').value); });
