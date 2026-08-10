@@ -167,26 +167,19 @@ function route(path) {
 }
 window.addEventListener('hashchange', () => route(location.hash.slice(1) || '/today'));
 
-/* ---------------------------------------------------------------- 오늘 (기본 화면 = 이벤트 큐) */
+/* ---------------------------------------------------------------- 오늘 (기본 화면)
+   구성 원칙: 시스템 지표(정독·확인율·문서 수)는 메타 한 줄로 강등하고,
+   몸통은 리서치 내용물 — ①임박 이벤트 ②내 판정 ③논제×논거(알파 강조) ④돈의 흐름 환산표. */
 routes.today = async main => {
-  const [b, cal, g] = await Promise.all([data('brief'), data('catalysts'), data('graph')]);
+  const [b, cal, cov] = await Promise.all([data('brief'), data('catalysts'), data('coverage')]);
 
-  // 병목 현재 위치 (코퍼스 병목 주장 밀도, 최근 3개월)
-  const order = g.bucket_order || [];
-  const bstrip = g.bottleneck_strip || [];
-  const recent3 = bstrip.slice(-3);
-  const heat = Object.fromEntries(order.map(k => [k, bstrip.reduce((s, m) => s + (m[k] || 0), 0)]));
-  const rh = Object.fromEntries(order.map(k => [k, recent3.reduce((s, m) => s + (m[k] || 0), 0)]));
-  const hot = order.reduce((a, k) => (rh[k] || 0) > (rh[a] || 0) ? k : a, order[0]);
-
-  // 이벤트 큐: 판정 안 된 지난 판별점(지연)이 맨 위 → 다가오는 순 → 처리된 것은 접기
+  // 임박 이벤트: 판정 안 된 만기분(지연) → 14일 내 → 나머지는 접기
   const judged = c => (c['판정'] || '').trim();
   const overdue = cal.filter(c => c.past && !judged(c));
   const upcoming = cal.filter(c => !c.past && !judged(c)).sort((a, b) => (a.dday === '' ? 999 : a.dday) - (b.dday === '' ? 999 : b.dday));
+  const near = upcoming.filter(c => c.dday !== '' && c.dday <= 14);
+  const later = upcoming.filter(c => !(c.dday !== '' && c.dday <= 14));
   const done = cal.filter(c => judged(c)).sort((a, b) => (b['확인일'] || b.date || '').localeCompare(a['확인일'] || a.date || ''));
-  const within7 = upcoming.filter(c => c.dday !== '' && c.dday <= 7);
-
-  const [chk, mat] = (b.metrics['확인율'] || '0/0').split('/');
 
   const ddChip = c => {
     if (c.past) return `<div class="dd late">D+${-c.dday}</div>`;
@@ -202,86 +195,92 @@ routes.today = async main => {
         <div class="t">${esc(c.name)} ${c.ticker ? `<span class="tick">${esc(c.ticker)}</span>` : ''}
           <span class="what">— ${esc(c.event)}</span>
           ${c['논제id'] ? `<span class="tag accent" title="논제 연결">${esc(c['논제id'])}</span>` : ''}</div>
-        ${c.threshold ? `<div class="crit">판정 기준 — ${esc(c.threshold)}</div>` : ''}
-        <div class="meta">${esc(c['확인경로'] || '')}${c.project ? ` · ${esc(c.project)}` : ''}
-          ${judged(c) ? ` · <span class="verdict">판정: ${esc(c['판정'])}</span>${c['확인일'] ? ` (${esc(c['확인일'])})` : ''}` : ''}</div>
+        ${c.threshold ? `<div class="crit">${esc(c.threshold)}</div>` : ''}
+        ${judged(c) ? `<div class="meta"><span class="verdict">판정: ${esc(c['판정'])}</span>${c['확인일'] ? ` (${esc(c['확인일'])})` : ''}</div>` : ''}
       </div>
       <div class="side">${kdate(c.date)}</div>
     </div>`;
 
   const statusTag = s => s === '유효' ? `<span class="tag good">유효</span>`
     : s === '반증' ? `<span class="tag bad">반증</span>` : `<span class="tag warn">${esc(s || '미정')}</span>`;
+  const reflTag = r => r === '미반영' ? `<span class="tag accent">컨센 미반영</span>`
+    : r === '부분' ? `<span class="tag line">부분 반영</span>` : `<span class="tag line" style="opacity:.6">반영됨</span>`;
+  const argDot = s => s === '적중' ? '<span class="adot g" title="적중"></span>'
+    : s === '반증' ? '<span class="adot b" title="반증"></span>' : '<span class="adot" title="미정"></span>';
+  const accTag = a => a === '정독실측' ? `<span class="tag good">정독실측</span>`
+    : a === '렌즈스냅샷' ? `<span class="tag line">스냅샷</span>` : `<span class="tag line" style="opacity:.6">색인</span>`;
+
+  // 내 판정: 판정이 등록된 커버리지만, 갱신순
+  const verdicts = cov.filter(c => c.curated && (c.verdict || '').trim())
+    .sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
 
   main.innerHTML = `<div class="wrap">
-  <div class="phead"><h2>오늘</h2><div class="desc">${kdate(b.generated)} · 코퍼스 최신 글 ${esc(b.corpus_last)}</div>
+  <div class="phead"><h2>오늘</h2><div class="desc">${kdate(b.generated)}</div>
     ${b.metrics.lint ? `<div class="right"><span class="tag bad">원장 정합 오류 ${b.metrics.lint}건</span></div>` : ''}</div>
-
-  <div class="stats">
-    <div class="stat"><div class="num">${within7.length}<small>건</small></div>
-      <div class="lab">7일 내 판별점</div>
-      <div class="sub">${within7[0] ? `다음: ${esc(within7[0].name)} · ${kdate(within7[0].date)}` : '임박한 일정 없음'}</div></div>
-    <div class="stat${overdue.length ? ' alert' : ''}"><div class="num">${overdue.length}<small>건</small></div>
-      <div class="lab">판정 대기 (만기 지남)</div>
-      <div class="sub">만기 도래 ${esc(mat)}건 중 ${esc(chk)}건 기입 완료</div></div>
-    <div class="stat"><div class="num">${esc((b.metrics['정독'] || '—').split('/')[0])}<small>/${esc((b.metrics['정독'] || '—/—').split('/')[1] || '')}편</small></div>
-      <div class="lab">정독 진행</div>
-      <div class="sub">코퍼스 전량 정독 캠페인 · 논제 ${b.metrics['논제']}개 / 논거 ${b.metrics['논거']}개</div></div>
-    <div class="stat"><div class="num" style="font-size:22px">${esc(hot || '—')}</div>
-      <div class="lab">병목 현재 위치</div>
-      <div class="sub">최근 3개월 코퍼스 병목 주장 최다 지점</div></div>
-  </div>
+  <p class="plede">코퍼스 최신 글 ${esc(b.corpus_last)} · 정독 ${esc(b.metrics['정독'])} · 논제 ${b.metrics['논제']} · 논거 ${b.metrics['논거']} · 판별점 기입 ${esc(b.metrics['확인율'])}</p>
 
   <section class="blk">
-    <h3>이벤트 큐 <a class="more" href="#/graph">지도에서 보기 →</a></h3>
-    <div class="sub">날짜 붙은 판정 조건(판별점). 판정 안 된 만기분이 맨 위로 올라온다 — 원장: db/판단/판별점.csv</div>
+    <h3>이벤트 <span class="more" style="color:var(--sub)">판정 안 된 만기분이 맨 위</span></h3>
     <div class="card queue">
       ${overdue.map(evRow).join('')}
-      ${upcoming.map(evRow).join('') || '<div class="empty">예정된 판별점 없음</div>'}
+      ${near.map(evRow).join('') || (overdue.length ? '' : '<div class="empty">14일 내 판별점 없음</div>')}
     </div>
-    ${done.length ? `<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--sub);font-size:13.5px">처리된 판별점 ${done.length}건 보기</summary>
-      <div class="card queue" style="margin-top:10px">${done.map(evRow).join('')}</div></details>` : ''}
+    ${later.length || done.length ? `<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--sub);font-size:13px">이후 일정 ${later.length}건 · 처리됨 ${done.length}건</summary>
+      <div class="card queue" style="margin-top:8px">${later.map(evRow).join('')}${done.map(evRow).join('')}</div></details>` : ''}
   </section>
 
   <section class="blk">
-    <h3>병목 이동</h3>
-    <div class="sub">코퍼스가 말하는 병목이 어디로 이동 중인가 — 숫자는 누적 주장 건수, 강조는 최근 3개월 최다</div>
-    <div class="card" style="padding:16px 18px"><div class="flow">
-      ${order.map((k, i) => `${i ? '<span class="ar">→</span>' : ''}<span class="fn${k === hot ? ' hot' : ''}">${k}<small>${heat[k] || 0}</small></span>`).join('')}
-    </div></div>
+    <h3>내 판정</h3>
+    <div class="card" style="overflow:hidden">${verdicts.map(c => `
+      <div class="vrow" data-p="${esc(c.primary || '')}">
+        <span class="nm">${esc(c.name || c.project)}</span>
+        ${verdictTag(c.verdict)}
+        <span class="tp">${esc(c.target || '')}${c.sizing ? ` · ${esc(c.sizing)}` : ''}</span>
+        <span class="trg">${esc(c.trigger || '')}</span>
+      </div>`).join('')}</div>
+    <div style="margin-top:7px;font-size:12.5px;color:var(--faint)">행 클릭 = 종합 보고서 · <a href="#/coverage">커버리지 전체 →</a></div>
   </section>
 
   <section class="blk">
-    <h3>새로 들어온 글</h3>
-    <div class="sub">SAPIENS 코퍼스 최신 유입 — 딥다이브는 파란 배지</div>
-    <div class="card feed">
-      ${b.recent_posts.map(p => `<div class="row"><span class="d">${kdate(p.date)}</span>
-        <span class="tag${p.type === 'deepdive' ? ' accent' : ' line'}">${p.type === 'deepdive' ? '딥다이브' : '주간'}</span>
-        <span class="t">${esc(p.title)}</span>
-        <span class="cos">${(p.top || []).slice(0, 3).map(k => `<span class="tag line">${esc(k)}</span>`).join('')}</span></div>`).join('')
-      || '<div class="empty">최근 글 없음</div>'}
-    </div>
-    ${b.recent_ratings.length ? `<div style="margin-top:10px;font-size:13px;color:var(--sub)">최근 등급 언급 —
-      ${b.recent_ratings.slice(0, 5).map(e => `${esc(e.company)} ${ratingTag(e.rating)}`).join(' · ')}</div>` : ''}
-  </section>
-
-  <section class="blk">
-    <h3>논제 보드</h3>
-    <div class="sub">지금 걸려 있는 주장들 — 정독이 진행될수록 논거가 쌓이고, 판별점이 판정을 낸다</div>
-    <div class="grid g2">
-    ${b.board.map(t => `
-      <div class="card thesis">
-        <div class="hd">${statusTag(t['상태'])}<span class="target">${esc(t['대상'])}</span><span class="id">${esc(t.id)}</span></div>
+    <h3>논제 × 논거</h3>
+    <div class="sub">지금 걸려 있는 주장과 그 근거 숫자들. <span class="tag accent" style="font-size:11px">컨센 미반영</span> = 시장이 아직 가격에 안 넣은 것 — 알파는 여기서 나온다</div>
+    ${b.board.map(t => {
+      const args = t['논거목록'] || [];
+      const top = args.slice(0, 4), rest = args.slice(4);
+      return `
+      <div class="card thesis" style="margin-bottom:14px">
+        <div class="hd">${statusTag(t['상태'])}<span class="target">${esc(t['대상'])}</span>
+          ${t.next_cp ? `<span class="tag warn" title="${esc(t.next_cp.event)}">다음 판별 ${t.next_cp.dday === 0 ? '오늘' : 'D-' + t.next_cp.dday} · ${esc(t.next_cp.name)}</span>` : ''}
+          ${t['판정이력'].length ? t['판정이력'].map(h => `<span class="tag good">${esc(h.name)} ${esc(h['판정'])}</span>`).join('') : ''}
+          <span class="id">${esc(t.id)}</span></div>
         <div class="claim">${esc(t['요지'])}</div>
-        <div class="score">
-          <span>논거 <b class="g">${t['논거']['적중']} 적중</b> · <b>${t['논거']['미정']} 미정</b>${t['논거']['반증'] ? ` · <b class="b">${t['논거']['반증']} 반증</b>` : ''}</span>
-          ${t['판정이력'].length ? `<span>판별 ${t['판정이력'].map(h => `${esc(h.name)} <b class="g">${esc(h['판정'])}</b>`).join(', ')}</span>` : ''}
+        ${t['계수'].length ? `<div class="coefs">${t['계수'].map(m =>
+          `<div class="coef"><b>${esc(m.value)}</b><span>${esc(m.label)}${m['시차'] ? ' · ' + esc(m['시차']) : ''}</span></div>`).join('')}</div>` : ''}
+        <div class="args">
+          ${top.map(a => `<div class="arg">${argDot(a['상태'])}<div class="atext">${esc(a['내용'])}</div>${reflTag(a['반영'])}</div>`).join('')}
+          ${rest.length ? `<details><summary style="cursor:pointer;color:var(--sub);font-size:12.5px;padding:4px 0 0 18px">논거 ${rest.length}개 더</summary>
+            ${rest.map(a => `<div class="arg">${argDot(a['상태'])}<div class="atext">${esc(a['내용'])}</div>${reflTag(a['반영'])}</div>`).join('')}</details>` : ''}
         </div>
-        ${t.next_cp ? `<div class="next">다음 판별점 — <b>${t.next_cp.dday === 0 ? '오늘' : 'D-' + t.next_cp.dday}</b> ${esc(t.next_cp.name)} · ${esc(t.next_cp.event)}</div>` : ''}
-        ${t['알파'].length ? `<div class="alpha"><em>컨센 미반영</em> — ${t['알파'].map(a => esc(a['내용'].split(' — ')[0])).join(' / ')}</div>` : ''}
-      </div>`).join('')}
-    </div>
+      </div>`;
+    }).join('')}
+  </section>
+
+  <section class="blk">
+    <h3>돈의 흐름 — 누구의 지출이 누구의 매출이 되나</h3>
+    <div class="sub">뉴스가 뜨면 이 표로 환산한다. 정확도: 정독실측(원문 정독) > 스냅샷(렌즈) > 색인(자동 추출)</div>
+    <div class="card" style="overflow:auto"><table class="tb"><thead><tr>
+      <th>흐름</th><th>내용</th><th>계수 · 규모</th><th>시차</th><th>정확도</th><th>논제</th></tr></thead><tbody>
+      ${(b.money || []).map(m => `<tr>
+        <td style="white-space:nowrap"><b>${esc(m.from_co || m.from_layer)}</b> → <b>${esc(m.to_co || m.to_layer)}</b></td>
+        <td>${esc(m.label)}</td>
+        <td style="font-weight:700">${esc(m.value)}</td>
+        <td style="color:var(--sub)">${esc(m['시차'] || '')}</td>
+        <td>${accTag(m['정확도'])}</td>
+        <td>${m['논제id'] ? `<span class="tag accent">${esc(m['논제id'])}</span>` : ''}</td></tr>`).join('')}
+    </tbody></table></div>
   </section>
   </div>`;
+  main.querySelectorAll('.vrow').forEach(r => { if (r.dataset.p) r.onclick = () => viewer(r.querySelector('.nm').textContent, r.dataset.p); });
 };
 
 /* ---------------------------------------------------------------- 커버리지 */
