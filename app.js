@@ -165,7 +165,7 @@ function route(path) {
     console.error(e);
   });
 }
-window.addEventListener('hashchange', () => route(location.hash.slice(1) || '/graph'));
+window.addEventListener('hashchange', () => route(location.hash.slice(1) || '/chain'));
 
 /* ---------------------------------------------------------------- 경제 지표 헬퍼 */
 const usdm = v => v == null ? '—' : (Math.abs(v) >= 1000 ? '$' + (v / 1000).toFixed(1) + 'B' : '$' + Math.round(v) + 'M');
@@ -183,7 +183,85 @@ function metricRows(list, n = 5) {
      <span>${esc(m.period)} · ${esc(m.src)} ${esc(m.date)}</span></div>`).join('');
 }
 
-/* ---------------------------------------------------------------- 오늘 (기본 화면)
+/* ---------------------------------------------------------------- 밸류체인 원장 (기본 화면)
+   재설계 v3: 그래프 캔버스가 아니라 위(수요)→아래(공급)로 읽는 경제 원장.
+   층 밴드 = 그 층 피어들의 비교표(YoY·GPM·OPM·capex·점유율), 밴드 사이 = 돈흐름 계수. */
+routes.chain = async main => {
+  const [g, econ] = await Promise.all([data('graph'), data('econ')]);
+  const EC = econ.companies || {}, LE = econ.layers || {};
+  const statusMap = Object.fromEntries((g.layer_status || []).map(s => [s.layer, s]));
+  const layers = g.layers.filter(l => l !== '커버 밖');
+  const byLayer = {};
+  g.nodes.forEach(n => { if (!n.external) (byLayer[n.layer] ||= []).push(n); });
+
+  const cell = (v, unit, cls) => v == null ? '<td class="num dim">—</td>'
+    : `<td class="num${cls || ''}">${v}${unit || ''}</td>`;
+  const yoyCell = v => v == null ? '<td class="num dim">—</td>'
+    : `<td class="num" style="font-weight:700;color:${v >= 0 ? 'var(--good)' : 'var(--bad)'}">${v > 0 ? '+' : ''}${v}%</td>`;
+
+  const share = name => {
+    const rows = (EC[name] || {}).metrics || [];
+    const s = rows.find(m => m.type === '점유율');
+    return s ? `<td class="num" title="${esc(s.metric)} · ${esc(s.src)} ${esc(s.date)}">${esc(s.value)}${esc(s.unit || '')}</td>` : '<td class="num dim">—</td>';
+  };
+
+  const compRow = n => {
+    const e = (EC[n.id] || {}).edgar || {};
+    const q = e.q || {}, f = e.fy || {};
+    return `<tr data-n="${esc(n.id)}">
+      <td><b>${esc(n.label)}</b> <span class="tick">${esc(n.ticker)}</span></td>
+      <td>${ratingTag(n.rating) || '<span class="dim">—</span>'}</td>
+      ${yoyCell(q.rev_yoy)}${cell(q.gpm, '%')}${cell(q.opm, '%')}${cell(f.capex_pct, '%')}
+      ${share(n.id)}
+      <td class="num dim">${fmt(n.mentions)}</td></tr>`;
+  };
+
+  const layerHead = l => {
+    const rows = LE[l] || [];
+    const tam = rows.find(m => m.type === 'TAM' || m.type === '시장규모');
+    const gr = rows.find(m => m.type === '성장률');
+    const st = statusMap[l];
+    return `${tam ? `<span class="lh-m" title="${esc(tam.src)} ${esc(tam.date)}">${esc(tam.metric)} <b>${esc(tam.value)} ${esc(tam.unit)}</b> (${esc(tam.period)})</span>` : ''}
+      ${gr ? `<span class="lh-m" title="${esc(gr.src)} ${esc(gr.date)}">${esc(gr.metric)} <b>${esc(gr.value)}${esc(gr.unit)}</b></span>` : ''}
+      ${st ? `<span class="lh-st">${esc(st['상태'] || '')}</span>` : ''}`;
+  };
+
+  const moneyOut = l => (g.money || []).filter(m => m.from_layer === l)
+    .map(m => `<div class="mflow" title="${esc(m['출처'])} · ${esc(m['정확도'])}">
+      <span class="ar">↓</span><b>${esc(m.value)}</b> — ${esc(m.label)}
+      <span class="to">→ ${esc(m.to_co || m.to_layer)}${m['시차'] ? ` · 시차 ${esc(m['시차'])}` : ''}</span></div>`).join('');
+
+  main.innerHTML = `<div class="wrap xl">
+    <div class="phead"><h2>AI 밸류체인 원장</h2>
+      <div class="desc">위(수요·돈의 출발점) → 아래(공급). 층 = 피어 비교, 층 사이 = 돈이 흐르는 계수</div>
+      <div class="right"><a class="btn" href="#/graph">관계 그래프 →</a></div></div>
+    <p class="plede">재무 = SEC EDGAR 최근분기(YoY·GPM·OPM은 분기, capex는 연간)
+      ${(() => { const a = Object.values(EC).find(c => c.edgar)?.edgar?.asof; return a ? `— 수집 기준 ${a}, 하루 2회 자동 갱신` : ''; })()}
+      · 점유율 = 산업 DB · 셀 위에 마우스를 올리면 출처. 행 클릭 = 종목 원장.</p>
+    ${layers.map(l => {
+      const ns = (byLayer[l] || []).sort((a, b) => b.mentions - a.mentions);
+      if (!ns.length) return '';
+      const top = ns.slice(0, 10), rest = ns.slice(10);
+      return `
+      <div class="lband">
+        <div class="lh"><h3>${esc(l)}</h3>${layerHead(l)}<span class="lh-n">${ns.length}개사</span></div>
+        <table class="tb ch"><thead><tr>
+          <th>기업</th><th>등급</th><th class="num">매출 YoY</th><th class="num">GPM</th><th class="num">OPM</th>
+          <th class="num">capex/매출</th><th class="num">점유율</th><th class="num">언급</th></tr></thead>
+          <tbody>${top.map(compRow).join('')}</tbody></table>
+        ${rest.length ? `<details class="lmore"><summary>+${rest.length}개사 더</summary>
+          <table class="tb ch"><tbody>${rest.map(compRow).join('')}</tbody></table></details>` : ''}
+      </div>
+      <div class="mgap">${moneyOut(l)}</div>`;
+    }).join('')}
+  </div>`;
+  main.querySelectorAll('tr[data-n]').forEach(r => {
+    r.style.cursor = 'pointer';
+    r.onclick = () => location.hash = '#/sapiens/' + encodeURIComponent(r.dataset.n);
+  });
+};
+
+/* ---------------------------------------------------------------- 오늘
    구성 원칙: 시스템 지표(정독·확인율·문서 수)는 메타 한 줄로 강등하고,
    몸통은 리서치 내용물 — ①임박 이벤트 ②내 판정 ③논제×논거(알파 강조) ④돈의 흐름 환산표. */
 routes.today = async main => {
@@ -868,7 +946,7 @@ async function boot2() {
     $('#topmeta').textContent = `빌드 ${man.built.slice(0, 16).replace('T', ' ')} · ${man.commit}`;
     $('#n-docs').textContent = man.counts.docs;
   } catch (e) { console.warn(e); }
-  route(location.hash.slice(1) || '/graph');
+  route(location.hash.slice(1) || '/chain');
 }
 (async function boot() {
   $('#q').addEventListener('keydown', e => { if (e.key === 'Enter') location.hash = '#/search/' + encodeURIComponent($('#q').value); });
