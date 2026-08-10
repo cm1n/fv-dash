@@ -29,9 +29,17 @@ async function blobName(path) {
   return 'blob/' + [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('') + '.enc';
 }
 async function fetchEnc(path) {
-  const r = await fetch(await blobName(path));
+  const bn = await blobName(path);
+  const r = await fetch(bn);
   if (!r.ok) throw new Error(path + ' → ' + r.status);
-  return decryptBuf(await r.arrayBuffer());
+  try {
+    return await decryptBuf(await r.arrayBuffer());
+  } catch (e) {
+    // 재배포 직후 브라우저/CDN에 구 암호문이 남은 창(≤10분) — 캐시 우회로 1회 재시도
+    const r2 = await fetch(bn, { cache: 'reload' });
+    if (!r2.ok) throw e;
+    return decryptBuf(await r2.arrayBuffer());
+  }
 }
 async function vaultInit() {
   let meta;
